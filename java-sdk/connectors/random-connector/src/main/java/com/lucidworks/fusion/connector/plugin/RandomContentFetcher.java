@@ -1,15 +1,17 @@
 package com.lucidworks.fusion.connector.plugin;
 
-import com.google.common.collect.ImmutableMap;
-import com.lucidworks.fusion.connector.plugin.api.fetcher.Fetcher;
-
 import com.lucidworks.fusion.connector.plugin.api.fetcher.type.content.FetchInput;
 
 import com.lucidworks.fusion.connector.plugin.api.fetcher.result.FetchResult;
 import com.lucidworks.fusion.connector.plugin.api.fetcher.result.PreFetchResult;
+import com.lucidworks.fusion.connector.plugin.api.fetcher.result.StartResult;
+import com.lucidworks.fusion.connector.plugin.api.fetcher.result.StopResult;
 import com.lucidworks.fusion.connector.plugin.api.fetcher.type.content.ContentFetcher;
-
 import com.lucidworks.fusion.connector.plugin.api.fetcher.type.content.MessageHelper;
+
+import org.apache.chemistry.opencmis.client.api.Document;
+import org.apache.chemistry.opencmis.client.api.Property;
+import org.apache.chemistry.opencmis.client.api.Session;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -19,8 +21,10 @@ import java.net.InetAddress;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.UUID;
 import java.util.stream.IntStream;
 
 public class RandomContentFetcher implements ContentFetcher {
@@ -32,6 +36,8 @@ public class RandomContentFetcher implements ContentFetcher {
   private final RandomContentConfig randomContentConfig;
   private final RandomContentGenerator generator;
 
+  Session session;
+  List<String> documentIdList;
   @Inject
   public RandomContentFetcher(
       RandomContentConfig randomContentConfig,
@@ -42,32 +48,54 @@ public class RandomContentFetcher implements ContentFetcher {
   }
 
   @Override
+  public StartResult start(StartContext context) {
+
+    //Session session = PnTConnectorClient.getConnectorClient("Crawler", "crawler").getSession();
+
+    //System.out.println(session.getObjectByPath("/Sites/pnt-portal/documentLibrary/Customer success").getName());
+
+    return ContentFetcher.super.start(context);
+  }
+
+  @Override
   public PreFetchResult preFetch(PreFetchContext preFetchContext) {
-    IntStream.range(0, randomContentConfig.properties().totalNumDocs()).asLongStream().forEach(i -> {
-      logger.info("Emitting candidate -> number {}", i);
+
+    session = PnTConnectorClient.getConnectorClient("Crawler", "crawler").getSession();
+
+    PnTContentCrawler contentCrawler = new PnTContentCrawler("/Sites/pnt-portal/documentLibrary/Customer success");
+
+    documentIdList = contentCrawler.getAllDocuments(session);
+    
+    for(Integer i=0;i<documentIdList.size();i++){
       Map<String, Object> data = Collections.singletonMap("number", i);
-      preFetchContext.emitCandidate(MessageHelper.candidate(String.valueOf(i), Collections.emptyMap(), data).build());
-    });
+      preFetchContext.emitCandidate(MessageHelper.candidate(i.toString(), Collections.emptyMap(), data).build());
+    }
+
+
+    /*IntStream.range(0, documentIdList.size()).asLongStream().forEach(i -> {
+      logger.info("Emitting candidate -> number {}", i);
+      Map<String, Object> data = Collections.singletonMap("number", count);
+      preFetchContext.emitCandidate(MessageHelper.candidate(UUID.randomUUID().toString(), Collections.emptyMap(), data).build());
+    });*/
     // Simulating an error item here... because we're emitting an item without a "number",
     // the fetch() call will attempt to convert the number into a long and throw an exception.
     // The item should be recorded as an error in the ConnectorJobStatus.
-    preFetchContext.emitCandidate(MessageHelper.candidate(ERROR_ID).build());
+    //preFetchContext.emitCandidate(MessageHelper.candidate(ERROR_ID).build());
     return preFetchContext.newResult();
   }
 
   @Override
   public FetchResult fetch(FetchContext fetchContext) {
     FetchInput input = fetchContext.getFetchInput();
-    logger.info("Received FetchInput -> {}", input);
-    String hostname = getHostname();
-
-    try {
+    Map<String,Object> contentMap = new HashMap<>();
+    Integer num = (Integer) input.getMetadata().get("number");
+    /*try {
       long num = (Long) input.getMetadata().get("number");
 
       String headline = generator.makeSentence(true);
       int numSentences = getRandomNumberInRange(10, 255);
       String txt = generator.makeText(numSentences);
-      logger.info("Emitting Document -> number {}", num);
+      //logger.info("Emitting Document -> number {}", num);
 
       Map<String, Object> fields = new HashMap();
       fields.put("number_i", num);
@@ -82,22 +110,21 @@ public class RandomContentFetcher implements ContentFetcher {
       }
 
       throw npe;
+    }*/
+
+    Document document = (Document)session.getObject(documentIdList.get((int)num));
+    //logger.info("Emitting Document -> number {}", num);
+
+    for(Property p : document.getProperties()){
+      contentMap.put(p.getId()+"_s",p.getValueAsString());
     }
+
+    fetchContext.emitDocument(contentMap);
     return fetchContext.newResult();
   }
 
-  private static int getRandomNumberInRange(int min, int max) {
-    if (min >= max) {
-      throw new IllegalArgumentException("max must be greater than min");
-    }
-    return rnd.nextInt((max - min) + 1) + min;
-  }
-
-  private String getHostname() {
-    try {
-      return InetAddress.getLocalHost().getHostName();
-    } catch (Exception ex) {
-      return "no-hostname";
-    }
+  @Override
+  public StopResult stop(StopContext context) {
+    return ContentFetcher.super.stop(context);
   }
 }

@@ -1,1 +1,7 @@
 .idea/
+java-sdk/connectors/random-connector/src/main/resources/
+java-sdk/connectors/.project
+java-sdk/connectors/.settings/
+java-sdk/connectors/.vscode/
+java-sdk/connectors/random-connector/.project
+java-sdk/connectors/random-connector/.settings/
